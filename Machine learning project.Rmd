@@ -1,0 +1,124 @@
+---
+title: "Machine Learning Project"
+author: "Arturo Carrion"
+date: "July 26 of 2020"
+---
+
+In this project we will predict the manner in which six participants did a series of excercises. Based on a data base provided by a group of investigators using some devices such Jawbone up, Nike Fuelband, and Fitbit, to collect the data about the excercises.
+
+#Loading the data
+
+```{r loading data, include=TRUE,cache=TRUE}
+library(caret)
+library(ggplot2)
+data = read.csv("C:/Users/arturo/Desktop/R/Machine learning/pml-training.csv")
+
+validation = read.csv("C:/Users/arturo/Desktop/R/Machine learning/pml-testing.csv")
+```
+
+##Exploratory analysis
+
+First, we will explore the data to see which variables are usefull and which are not.
+
+```{r Exploring data 1, results=FALSE,cache=TRUE}
+#I will hide the results because of the length of the output.
+str(data)
+```
+
+It seems that there are variables that has many NA's and others that empty. This variables are the related with the statistics (kurtosis, skewness, max min, avg, etc) of each device and each movement. Let's see the number of the missing data of a selected variables.
+
+```{r Exploring data 2, include=TRUE,cache=TRUE}
+
+summary(data$max_roll_belt)
+summary(data$amplitude_pitch_forearm)
+summary(data$max_yaw_arm)
+```
+
+Ass we can see there is a great part of the variables that is missing. So, we will exclude those variables from the dataset in the training and the test set. Also we will exclude variables that are irrelevant for the study, like X, user_name, rawtime, etc.
+
+```{r Exploring data 3, include=TRUE,cache=TRUE}
+
+Data_2 = data[,-c(1:7,12:36,50:59,69:83,87:101,103:112,125:139,141:150)]
+
+#Let's create the Data Partition on the Classe variable
+set.seed(121995)
+Index = createDataPartition(y=Data_2$classe,p=3/4,list=FALSE)
+training = Data_2[Index,]
+testing = Data_2[-Index,]
+
+Validation_2 = validation[,-c(1:7,12:36,50:59,69:83,87:101,103:112,125:139,141:150)]
+```
+
+##The Model
+
+Now that we have cleaned the data, and created the training and testing data (for cross-validation), we can build the model. As Classe is a factor variable we think of a decision tree model rather than a regression model, because it has better performance in nonlinear settings, and we want to predict the data using different methods of decision tree as Random Forest or GBM.
+
+```{r Models 1, include=TRUE,cache=TRUE}
+library(gbm)
+library(randomForest)
+library(forecast)
+
+#models
+set.seed(121995)
+rpart_mod = train(as.factor(classe)~.,method="rpart",data=training)
+rf_mod = train(as.factor(classe)~.,method="rf",data=training)
+gbm_mod = train(as.factor(classe)~.,method="gbm",data=training,verbose=FALSE)
+#predicting
+rpart_pred = predict(rpart_mod,newdata= testing)
+rf_pred = predict(rf_mod,newdata= testing)
+gbm_pred = predict(gbm_mod,newdata= testing)
+#Confusion Matrix
+print(paste0("Rpart Accuracy = ",round((confusionMatrix(rpart_pred,as.factor(testing$classe))$overall["Accuracy"])*100,2),"%"))
+print(paste0("RF Accuracy = ",round((confusionMatrix(rf_pred,as.factor(testing$classe))$overall["Accuracy"])*100,2),"%"))
+print(paste0("GBM Accuracy = ",round((confusionMatrix(gbm_pred,as.factor(testing$classe))$overall["Accuracy"])*100,2),"%"))
+#Stacking
+stack_data = data.frame(rpart_pred,rf_pred,gbm_pred,classe=testing$classe)
+stack_mod = train(as.factor(classe)~.,method="rpart",data=stack_data)
+stack_pred = predict(stack_mod,newdata=testing)
+print(paste0("Stack Accuracy = ",round((confusionMatrix(stack_pred,as.factor(testing$classe))$overall["Accuracy"])*100,2),"%"))
+
+```
+
+It seems like the Random Forest method is sufficient to predict the Classe variable because of its accuracy but, let's see how it work with the PCA method of pre-processing because we want to discard any bias and issue due to overfitting.
+
+```{r Models 2, include=TRUE,cache=TRUE,warning=FALSE}
+
+#models
+set.seed(121995)
+rpart_pca_mod = train(as.factor(classe)~.,method="rpart",data=training, preProcess="pca")
+rf_pca_mod = train(as.factor(classe)~.,method="rf",data=training,preProcess="pca")
+gbm_pca_mod = train(as.factor(classe)~.,method="gbm",data=training,verbose=FALSE,preProcess="pca")
+#predicting
+rpart_pca_pred = predict(rpart_pca_mod,newdata= testing)
+rf_pca_pred = predict(rf_pca_mod,newdata= testing)
+gbm_pca_pred = predict(gbm_pca_mod,newdata= testing)
+#Confusion Matrix
+print(paste0("Rpart-PCA Accuracy = ",round((confusionMatrix(rpart_pca_pred,as.factor(testing$classe))$overall["Accuracy"])*100,2),"%"))
+print(paste0("RF-PCA Accuracy = ",round((confusionMatrix(rf_pca_pred,as.factor(testing$classe))$overall["Accuracy"])*100,2),"%"))
+print(paste0("GBM-PCA Accuracy = ",round((confusionMatrix(gbm_pca_pred,as.factor(testing$classe))$overall["Accuracy"])*100,2),"%"))
+#Stacking
+stack_pca_data = data.frame(rpart_pca_pred,rf_pca_pred,gbm_pca_pred,classe=testing$classe)
+stack_pca_mod = train(as.factor(classe)~.,method="rpart",data=stack_data)
+stack_pred = predict(stack_mod,newdata=testing)
+print(paste0("Stack Accuracy = ",round((confusionMatrix(stack_pred,as.factor(testing$classe))$overall["Accuracy"])*100,2),"%"))
+```
+
+It seems like the Non-PCA models are better for the prediction on the testing dataset. I wanted to avoid overfitting, but it may be possible that, due to all the data suministrated, the alghorithm could predict very correctly or accurate the outcome of the variable "classe".
+
+#Final Results
+```{r OoTSE, include=FALSE,cache=TRUE,echo=FALSE}
+Acc_gbm = confusionMatrix(gbm_pred,as.factor(testing$classe))$overall[1]
+
+OoTSE = paste0(round((1-Acc_gbm)*100,2),"%")
+
+```
+We decided to apply the model with the GBM method to predict the validation data. Expecting an out of the sample error of **`r{OoTSE}`**. Let's check the result.
+
+```{r Results,cache=TRUE}
+
+Classe_Predict = predict(gbm_mod,newdata= Validation_2)
+
+data.frame(Classe_Predict)
+```
+
+
